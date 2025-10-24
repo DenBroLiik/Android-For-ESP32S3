@@ -1,15 +1,16 @@
 /* bootloader_full_lvgl9_fastboot.ino
  *
+ * Полная версия, адаптированная под LVGL v9 API.
+ *
  * Требования:
  *  - Arduino ESP32-S3 core (3.x)
  *  - Adafruit TinyUSB (включающий VENDOR interface) или tinyusb-dev пакет
- *  - LVGL v9.x установлен через Library Manager
+ *  - LVGL v9.x установлен через Library Manager (обязательно!)
  *
- * TODOs (перед первой прошивкой):
- *  - Проверь и при необходимости адаптируй TinyUSB дескрипторы, чтобы VENDOR интерфейс был доступен.
- *  - В init_st7789() допиши init sequence по даташиту и сохрани spi-device handle в глобальную переменную.
- *  - При необходимости подбери max_transfer_sz и разбивай передачи в flush на чанки.
- *  - Если хочешь поддерживать реальный fastboot-client (Android fastboot), протестируй и скорректируй дескрипторы/endpoint адреса.
+ * TODO:
+ *  - Подставьте реальный ST7789 init sequence в init_st7789().
+ *  - При необходимости скорректируйте размеры draw-buffer'ов под вашу RAM.
+ *  - SSD1306: реализовать преобразование RGB565 -> 1-bit pages (для монохромных дисплеев).
  */
 
 #define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE)
@@ -24,13 +25,15 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <driver/i2c.h>
+#include <driver/ledc.h>
 #include <lvgl.h>
 #include <Adafruit_TinyUSB.h>
-#include "tusb.h" // tinyusb core (Adafruit includes it)
+#include "tusb.h"
 
-/* ---------- Configuration ---------- */
+static const char *TAG = "SBL";
 
-// ST7789 SPI pins
+/* ---------- Pins ---------- */
+// ST7789 SPI pins (пример — поменяй под свою плату при необходимости)
 #define PIN_SCLK 18
 #define PIN_MOSI 23
 #define PIN_DC   17
@@ -49,34 +52,55 @@
 #define PIN_DT 2
 #define PIN_SW 1
 
-static const char *TAG = "SBL";
+// RGB LED (LEDC)
+#define PIN_LED_R 25
+#define PIN_LED_G 26
+#define PIN_LED_B 27
 
+/* ---------- Fastboot constants ---------- */
 #define FASTBOOT_CMD_SIZE 512
 #define FASTBOOT_RESP_OKAY "OKAY"
 #define FASTBOOT_RESP_FAIL "FAIL"
 #define FASTBOOT_RESP_DATA "DATA"
 
+/* ---------- Compatibility / safety ---------- */
+/* Some SDK variants may not define LEDC_HIGH_SPEED_MODE macro */
+#ifndef LEDC_HIGH_SPEED_MODE
+#define LEDC_HIGH_SPEED_MODE LEDC_LOW_SPEED_MODE
+#endif
+
+/* Detect LVGL major version (support в основном LVGL v9) */
+#if defined(LVGL_VERSION_MAJOR)
+  #define _LV_MAJOR LVGL_VERSION_MAJOR
+#elif defined(LV_VERSION_MAJOR)
+  #define _LV_MAJOR LV_VERSION_MAJOR
+#else
+  #define _LV_MAJOR 9
+#endif
+
+/* ---------- Globals ---------- */
 static bool st7789_detected = false;
 static bool ssd1306_detected = false;
+static spi_device_handle_t st7789_spi = NULL; // assigned in init_st7789()
+Adafruit_USBD_CDC usb_serial;
 
-/* ---------- Globals for drivers ---------- */
-static spi_device_handle_t st7789_spi = NULL; // set in init_st7789()
+/* ---------- Forward declarations (LVGL v9 flush signatures) ---------- */
+#if _LV_MAJOR >= 9
+static void st7789_flush_cb(lv_display_t *disp, const lv_area_t *area, const lv_color_t *color_p);
+static void ssd1306_flush_cb(lv_display_t *disp, const lv_area_t *area, const lv_color_t *color_p);
+#else
+/* if somehow compiling older LVGL, you'd need other signatures — but this file targets v9 */
+#endif
 
-Adafruit_USBD_CDC usb_serial; // CDC example; we also use VENDOR endpoints (tud_vendor_*)
-
-/* ---------- Helper: tinyusb vendor wrappers ---------- */
-/* Note: Adafruit TinyUSB examples on Arduino often provide tud_vendor_* only if vendor is enabled
-   in descriptors. If not, you'll need to add vendor descriptors (see TODOs below). */
-
+/* ---------- TinyUSB vendor helpers ---------- */
 static int vendor_read_cmd_blocking(char *buf, int maxlen, int timeout_ms) {
   int total = 0;
   TickType_t start = xTaskGetTickCount();
   while (total < maxlen) {
     if (tud_vendor_available()) {
-      int r = tud_vendor_read(buf + total, maxlen - total);
+      int r = tud_vendor_read((uint8_t*)(buf + total), maxlen - total);
       if (r > 0) {
         total += r;
-        // treat newline as end-of-command (optional)
         if (memchr(buf, '\n', total) || memchr(buf, '\r', total)) break;
       }
     }
@@ -84,7 +108,6 @@ static int vendor_read_cmd_blocking(char *buf, int maxlen, int timeout_ms) {
     vTaskDelay(pdMS_TO_TICKS(5));
   }
   if (total > 0) {
-    // strip CR/LF
     while (total > 0 && (buf[total-1] == '\n' || buf[total-1] == '\r')) total--;
     buf[total] = 0;
   }
@@ -100,14 +123,12 @@ static void vendor_write_resp(const char *s) {
 /* ---------- ST7789 init & LVGL flush (DMA-capable) ---------- */
 
 bool init_st7789(void) {
-  // configure SPI bus
   spi_bus_config_t buscfg = {};
   buscfg.mosi_io_num = PIN_MOSI;
   buscfg.miso_io_num = -1;
   buscfg.sclk_io_num = PIN_SCLK;
   buscfg.quadwp_io_num = -1;
   buscfg.quadhd_io_num = -1;
-  // default max_transfer_sz will be OK for now
 
   esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
   if (ret != ESP_OK) {
@@ -116,7 +137,7 @@ bool init_st7789(void) {
   }
 
   spi_device_interface_config_t devcfg = {};
-  devcfg.clock_speed_hz = 40 * 1000 * 1000; // try 40MHz, reduce if bad
+  devcfg.clock_speed_hz = 40 * 1000 * 1000; // попробуй 40MHz, при проблемах уменьшить
   devcfg.mode = 0;
   devcfg.spics_io_num = PIN_CS;
   devcfg.queue_size = 7;
@@ -136,21 +157,16 @@ bool init_st7789(void) {
   gpio_set_level((gpio_num_t)PIN_RES, 1);
   vTaskDelay(pdMS_TO_TICKS(120));
 
-  // TODO: real ST7789 init sequence (commands + args)
-  // Minimal placeholder: user must replace with display-specific seq.
+  // TODO: сюда поставить реальный инициализационный набор команд ST7789 (команды + аргументы).
   ESP_LOGI(TAG, "ST7789 spi device created (handle stored)");
-
   return true;
 }
 
-/* LVGL flush callback (compatible pattern for LVGL 8/9):
-   - Converts lv_color_t buffer to raw bytes if needed and sends via SPI using st7789_spi.
-   - Uses blocking spi_device_transmit for simplicity.
-   - For speed, split into chunks of max_transfer_size (query via spi_bus_get_cfg? or set known constant).
-*/
-static void st7789_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
+/* LVGL v9 flush callback: st7789 */
+#if _LV_MAJOR >= 9
+static void st7789_flush_cb(lv_display_t *disp, const lv_area_t *area, const lv_color_t *color_p) {
   if (!st7789_spi) {
-    lv_disp_flush_ready(disp_drv);
+    lv_display_flush_ready(disp);
     return;
   }
 
@@ -161,26 +177,20 @@ static void st7789_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_c
   int32_t w = (x2 - x1 + 1);
   int32_t h = (y2 - y1 + 1);
   size_t px_cnt = (size_t)w * (size_t)h;
-
-  // NOTE: lv_color_t is likely 2 bytes (RGB565) in common configs.
-  // We'll send raw buffer as-is assuming lv_color_t packing matches display format.
-  // If not — convert here (pack to RGB565 or 3x8 RGB as required).
   size_t bytes_total = px_cnt * sizeof(lv_color_t);
   const uint8_t *data_ptr = (const uint8_t*)color_p;
 
-  // 1) Set column/address window commands for ST7789
-  // TODO: Replace with correct command sequence for your module.
+  // CASET/RASET/RAMWR
   uint8_t col_cmd[] = {
-    0x2A, // CASET
+    0x2A,
     (uint8_t)((x1 >> 8) & 0xFF), (uint8_t)(x1 & 0xFF),
     (uint8_t)((x2 >> 8) & 0xFF), (uint8_t)(x2 & 0xFF),
-    0x2B, // RASET
+    0x2B,
     (uint8_t)((y1 >> 8) & 0xFF), (uint8_t)(y1 & 0xFF),
     (uint8_t)((y2 >> 8) & 0xFF), (uint8_t)(y2 & 0xFF),
-    0x2C  // RAMWR
+    0x2C
   };
 
-  // Helper to send commands (DC=0)
   spi_transaction_t t = {};
   gpio_set_level((gpio_num_t)PIN_DC, 0);
   t.length = 8 * (sizeof(col_cmd));
@@ -190,12 +200,10 @@ static void st7789_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_c
     ESP_LOGW(TAG, "st7789: command tx failed %s", esp_err_to_name(r));
   }
 
-  // Send pixel data in chunks
   size_t sent = 0;
-  gpio_set_level((gpio_num_t)PIN_DC, 1); // data
+  gpio_set_level((gpio_num_t)PIN_DC, 1); // data mode
   while (sent < bytes_total) {
     size_t chunk = bytes_total - sent;
-    // choose safe chunk size (e.g., 4096 or less depending on max_transfer_sz)
     if (chunk > 4096) chunk = 4096;
     spi_transaction_t tx = {};
     tx.length = 8 * chunk;
@@ -208,10 +216,11 @@ static void st7789_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_c
     sent += chunk;
   }
 
-  lv_disp_flush_ready(disp_drv);
+  lv_display_flush_ready(disp);
 }
+#endif
 
-/* ---------- SSD1306 (I2C) simple flush placeholder ---------- */
+/* ---------- SSD1306 stub (I2C) ---------- */
 bool init_ssd1306(void) {
   i2c_config_t conf = {};
   conf.mode = I2C_MODE_MASTER;
@@ -246,13 +255,15 @@ bool init_ssd1306(void) {
   return true;
 }
 
-static void ssd1306_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
-  // TODO: implement conversion RGB565 -> 1-bit pages and send via I2C.
-  // For now: mark flush done so LVGL doesn't hang.
-  lv_disp_flush_ready(disp_drv);
+#if _LV_MAJOR >= 9
+static void ssd1306_flush_cb(lv_display_t *disp, const lv_area_t *area, const lv_color_t *color_p) {
+  // TODO: преобразование RGB565 -> 1-bit страницы SSD1306 и запись через I2C.
+  // Пока сообщаем LVGL, что flush завершён.
+  lv_display_flush_ready(disp);
 }
+#endif
 
-/* ---------- LVGL display registration (supports LVGL v9 detection fallback) ---------- */
+/* ---------- LVGL display registration (v9) ---------- */
 
 static void lvgl_tick_task(void *arg) {
   (void)arg;
@@ -265,7 +276,6 @@ static void lvgl_tick_task(void *arg) {
 void init_lvgl_display(void) {
   lv_init();
 
-  // detect displays
   st7789_detected = init_st7789();
   ssd1306_detected = init_ssd1306();
 
@@ -273,40 +283,99 @@ void init_lvgl_display(void) {
     ESP_LOGW(TAG, "No display found, LVGL will still run but no actual flush.");
   }
 
-  // draw_buf size - adapt to larger display
-  static lv_disp_draw_buf_t draw_buf;
-  static lv_color_t buf[240 * 240 / 8]; // smaller buffer to save RAM
-  lv_disp_draw_buf_init(&draw_buf, buf, NULL, sizeof(buf) / sizeof(lv_color_t));
+#if _LV_MAJOR >= 9
+  // choose resolution based on detected display
+  int hor = st7789_detected ? 240 : (ssd1306_detected ? 128 : 128);
+  int ver = st7789_detected ? 240 : (ssd1306_detected ? 64 : 64);
 
-  static lv_disp_drv_t disp_drv;
-  lv_disp_drv_init(&disp_drv);
-  disp_drv.draw_buf = &draw_buf;
-  if (st7789_detected) {
-    disp_drv.hor_res = 240;
-    disp_drv.ver_res = 240;
-    disp_drv.flush_cb = st7789_flush_cb;
-  } else if (ssd1306_detected) {
-    disp_drv.hor_res = 128;
-    disp_drv.ver_res = 64;
-    disp_drv.flush_cb = ssd1306_flush_cb;
-  } else {
-    // generic fallback - small buffer so LVGL functions but nothing visible
-    disp_drv.hor_res = 128;
-    disp_drv.ver_res = 64;
-    disp_drv.flush_cb = ssd1306_flush_cb;
+  lv_display_t *disp = lv_display_create(hor, ver);
+  if (!disp) {
+    ESP_LOGE(TAG, "lv_display_create failed");
+    return;
   }
-  lv_disp_drv_register(&disp_drv);
 
-  // create sample label
-  lv_obj_t *label = lv_label_create(lv_scr_act());
-  lv_label_set_text(label, st7789_detected ? "Zephyr Boot (ST7789)" : "Zephyr Boot (SSD1306/none)");
-  lv_obj_center(label);
+  // create draw buffer(s): make a small chunk to save RAM; LVGL expects buffer size in bytes.
+  // For color ST7789 (RGB565) sizeof(lv_color_t) == 2 normally.
+  // Reserve a buffer that fits a few lines: e.g., hor * 40 pixels.
+  static lv_color_t draw_buf1[240 * 40]; // ~19 KB for 240x40 (RGB565)
+  void *buf1 = draw_buf1;
+  void *buf2 = NULL; // single-buffer mode; set second buffer if you have RAM and want double buffering
+  uint32_t buf_size_bytes = sizeof(draw_buf1);
 
-  // create lv task
+  // Some LVGL builds require +8 bytes in buffer for palette; docs recommend adding 8 bytes.
+  // We allocate as lv_color_t[], so pass raw pointer and size in bytes.
+  lv_display_set_buffers(disp, buf1, buf2, buf_size_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+
+  // set color format for ST7789 (RGB565), for SSD1306 you'd handle differently
+  lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+
+  // set flush callback depending on panel
+  if (st7789_detected) {
+    lv_display_set_flush_cb(disp, st7789_flush_cb);
+  } else {
+    lv_display_set_flush_cb(disp, ssd1306_flush_cb);
+  }
+
+  // make this display the default
+  lv_display_set_default(disp);
+
+  // create a splash screen (LVGL v9 style uses screen objects)
+  lv_obj_t *scr = lv_obj_create(NULL); // new screen
+  lv_obj_set_size(scr, hor, ver);
+  lv_obj_set_style_pad_all(scr, 0, 0);
+
+  // Background and labels depending on color/mono
+  if (st7789_detected) {
+    // green background
+    lv_obj_set_style_bg_color(scr, lv_color_make(0, 200, 0), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+    lv_obj_t *label = lv_label_create(scr);
+    lv_label_set_text(label, "Zephyr");
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0); // commonly present, fallback if missing
+    lv_obj_center(label);
+
+    lv_obj_t *lock = lv_label_create(scr);
+    lv_label_set_text(lock, "🔓"); // stub: replace with actual efuse read
+    lv_obj_align(lock, LV_ALIGN_TOP_MID, 0, 6);
+
+    lv_obj_t *pb = lv_label_create(scr);
+    lv_label_set_text(pb, "Powered by Android");
+    lv_obj_align(pb, LV_ALIGN_BOTTOM_MID, 0, -6);
+  } else {
+    // monochrome-like background (light gray)
+    lv_obj_set_style_bg_color(scr, lv_color_make(180, 180, 180), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+    lv_obj_t *label = lv_label_create(scr);
+    lv_label_set_text(label, "Zephyr");
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_center(label);
+
+    lv_obj_t *lock = lv_label_create(scr);
+    lv_label_set_text(lock, "🔓");
+    lv_obj_align(lock, LV_ALIGN_TOP_MID, 0, 4);
+
+    lv_obj_t *pb = lv_label_create(scr);
+    lv_label_set_text(pb, "Powered by Android");
+    lv_obj_align(pb, LV_ALIGN_BOTTOM_MID, 0, -4);
+  }
+
+  // load our screen to the display
+  lv_display_load_scr(scr);
+
+  // start LVGL tick task
   xTaskCreatePinnedToCore(lvgl_tick_task, "lvgl", 4096, NULL, 5, NULL, tskNO_AFFINITY);
+
+#else
+  // If somehow compiled with LVGL <9 (not intended), do nothing here.
+  ESP_LOGE(TAG, "This file is written for LVGL v9; found older LVGL version.");
+#endif
 }
 
-/* ---------- Encoder init (simple) ---------- */
+/* ---------- Encoder init ---------- */
 void init_encoder(void) {
   gpio_config_t io_conf = {
     .pin_bit_mask = (1ULL << PIN_CLK) | (1ULL << PIN_DT) | (1ULL << PIN_SW),
@@ -318,22 +387,138 @@ void init_encoder(void) {
   gpio_config(&io_conf);
 }
 
-/* ---------- TinyUSB init & descriptors notes ---------- */
+/* ---------- LED manager (LEDC) ---------- */
 
-void init_tinyusb(void) {
-  // Note: Adafruit_TinyUSB library initializes TinyUSB automatically when
-  // you use Adafruit_USBD_* classes. However for vendor interface support
-  // you must ensure the USB descriptors include the vendor interface.
-  //
-  // If your Adafruit_TinyUSB build already has vendor support (many boards do),
-  // then the following is OK:
-  TinyUSBDevice.begin();
-  ESP_LOGI(TAG, "TinyUSB started");
-  // If you want to also use CDC (for console), begin USB CDC:
-  usb_serial.begin(115200);
+enum led_state_e {
+  LED_STATE_OFF = 0,
+  LED_STATE_FASTBOOT,   // red breathing
+  LED_STATE_FLASHING,   // fast blink while flashing
+  LED_STATE_FLASH_OK,   // green for 3s then revert
+  LED_STATE_FLASH_FAIL, // yellow for 3s then revert
+  LED_STATE_NORMAL_BOOT
+};
+
+static volatile led_state_e led_state = LED_STATE_OFF;
+static led_state_e led_prev_state = LED_STATE_OFF;
+
+#define LEDC_TIMER       LEDC_TIMER_0
+#define LEDC_MODE_LOCAL  LEDC_HIGH_SPEED_MODE
+#define LEDC_DUTY_RES    LEDC_TIMER_13_BIT
+#define LEDC_FREQUENCY   5000
+
+static void led_init(void) {
+  ledc_timer_config_t ledc_timer = {};
+  ledc_timer.speed_mode = LEDC_MODE_LOCAL;
+  ledc_timer.timer_num = LEDC_TIMER;
+  ledc_timer.duty_resolution = LEDC_DUTY_RES;
+  ledc_timer.freq_hz = LEDC_FREQUENCY;
+  ledc_timer.clk_cfg = LEDC_AUTO_CLK;
+  ledc_timer_config(&ledc_timer);
+
+  ledc_channel_config_t ch = {};
+  ch.gpio_num = PIN_LED_R;
+  ch.speed_mode = LEDC_MODE_LOCAL;
+  ch.channel = LEDC_CHANNEL_0;
+  ch.intr_type = LEDC_INTR_DISABLE;
+  ch.timer_sel = LEDC_TIMER;
+  ch.duty = 0;
+  ch.hpoint = 0;
+  ledc_channel_config(&ch);
+
+  ch.gpio_num = PIN_LED_G;
+  ch.channel = LEDC_CHANNEL_1;
+  ledc_channel_config(&ch);
+
+  ch.gpio_num = PIN_LED_B;
+  ch.channel = LEDC_CHANNEL_2;
+  ledc_channel_config(&ch);
 }
 
-/* ---------- Full Fastboot-like server over VENDOR (bulk) ---------- */
+static void led_set_rgb_raw(uint32_t r, uint32_t g, uint32_t b) {
+  ledc_set_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_0, r);
+  ledc_update_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_0);
+  ledc_set_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_1, g);
+  ledc_update_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_1);
+  ledc_set_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_2, b);
+  ledc_update_duty(LEDC_MODE_LOCAL, LEDC_CHANNEL_2);
+}
+
+static void led_set_state(led_state_e s) {
+  if (s == LED_STATE_FLASH_OK || s == LED_STATE_FLASH_FAIL) {
+    led_prev_state = led_state;
+    led_state = s;
+  } else {
+    led_state = s;
+  }
+}
+
+static void led_task(void *arg) {
+  (void)arg;
+  const uint32_t duty_max = (1 << LEDC_DUTY_RES) - 1;
+  TickType_t last_wake = xTaskGetTickCount();
+
+  for (;;) {
+    TickType_t now = xTaskGetTickCount();
+    uint32_t ms = (now * portTICK_PERIOD_MS);
+
+    switch (led_state) {
+      case LED_STATE_FASTBOOT: {
+        uint32_t period = 1000;
+        uint32_t t = ms % period;
+        uint32_t val = (t < period/2) ? (t * 2 * duty_max / period) : ((period - t) * 2 * duty_max / period);
+        led_set_rgb_raw(val, 0, 0);
+        break;
+      }
+      case LED_STATE_FLASHING: {
+        uint32_t t = ms % 250;
+        if (t < 125) led_set_rgb_raw(duty_max, 0, 0);
+        else led_set_rgb_raw(0, 0, 0);
+        break;
+      }
+      case LED_STATE_FLASH_OK: {
+        led_set_rgb_raw(0, duty_max, 0);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        led_state = led_prev_state ? led_prev_state : LED_STATE_FASTBOOT;
+        break;
+      }
+      case LED_STATE_FLASH_FAIL: {
+        led_set_rgb_raw(duty_max, duty_max, 0);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        led_state = led_prev_state ? led_prev_state : LED_STATE_FASTBOOT;
+        break;
+      }
+      case LED_STATE_NORMAL_BOOT: {
+        uint32_t period = 3000;
+        uint32_t t = ms % period;
+        float phase = (float)t / (float)period;
+        uint32_t r = 0, g = 0, b = 0;
+        if (phase < 0.3333f) {
+          float p = phase / 0.3333f;
+          g = duty_max;
+          b = (uint32_t)(p * duty_max);
+        } else if (phase < 0.6666f) {
+          float p = (phase - 0.3333f) / 0.3333f;
+          g = (uint32_t)((1.0f - p) * duty_max);
+          b = duty_max;
+        } else {
+          float p = (phase - 0.6666f) / 0.3334f;
+          g = (uint32_t)(p * duty_max);
+          b = (uint32_t)((1.0f - p) * duty_max);
+        }
+        led_set_rgb_raw(r, g, b);
+        break;
+      }
+      case LED_STATE_OFF:
+      default:
+        led_set_rgb_raw(0, 0, 0);
+        break;
+    }
+
+    vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+  }
+}
+
+/* ---------- Fastboot vendor loop ---------- */
 
 void fastboot_vendor_loop(void *arg) {
   (void)arg;
@@ -363,17 +548,16 @@ void fastboot_vendor_loop(void *arg) {
       const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, partname);
       if (!part) { vendor_write_resp(FASTBOOT_RESP_FAIL); continue; }
 
-      // Wait header: "DATA<size>"
       int hlen = vendor_read_cmd_blocking(cmd, FASTBOOT_CMD_SIZE, 5000);
       if (hlen <= 0 || strncmp(cmd, "DATA", 4) != 0) { vendor_write_resp(FASTBOOT_RESP_FAIL); continue; }
       uint32_t expected = (uint32_t) strtoul(cmd + 4, NULL, 10);
-      // ACK
       vendor_write_resp(FASTBOOT_RESP_OKAY);
 
       uint32_t received = 0;
       uint32_t write_off = 0;
+      led_set_state(LED_STATE_FLASHING);
+
       while (received < expected) {
-        // read a chunk - non-blocking with small delay
         int r = tud_vendor_read(data_buf, sizeof(data_buf));
         if (r <= 0) {
           vTaskDelay(pdMS_TO_TICKS(5));
@@ -383,12 +567,16 @@ void fastboot_vendor_loop(void *arg) {
         if (w != ESP_OK) {
           ESP_LOGE(TAG, "partition write err %s", esp_err_to_name(w));
           vendor_write_resp(FASTBOOT_RESP_FAIL);
+          led_set_state(LED_STATE_FLASH_FAIL);
           break;
         }
         write_off += r;
         received += r;
       }
-      if (received == expected) vendor_write_resp(FASTBOOT_RESP_OKAY);
+      if (received == expected) {
+        vendor_write_resp(FASTBOOT_RESP_OKAY);
+        led_set_state(LED_STATE_FLASH_OK);
+      }
     } else if (strncmp(cmd, "set_active:", 11) == 0) {
       const char *slot = cmd + 11;
       const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, slot);
@@ -399,12 +587,10 @@ void fastboot_vendor_loop(void *arg) {
       vendor_write_resp(FASTBOOT_RESP_OKAY);
       esp_restart();
     } else if (strncmp(cmd, "oem unlock", 10) == 0) {
-      // Very dangerous to implement real eFuse changes. This is a stub.
       vendor_write_resp(FASTBOOT_RESP_OKAY);
       ESP_LOGW(TAG, "oem unlock requested (NOT IMPLEMENTED: use with caution)");
     } else if (strncmp(cmd, "continue", 8) == 0) {
       vendor_write_resp(FASTBOOT_RESP_OKAY);
-      // return to normal boot
       break;
     } else {
       vendor_write_resp(FASTBOOT_RESP_FAIL);
@@ -417,18 +603,22 @@ void fastboot_vendor_loop(void *arg) {
 /* ---------- Boot logic ---------- */
 
 bool check_firmware_signature(const esp_partition_t *p) {
-  // TODO: implement real signature or AVB/verified boot if needed.
   (void)p;
+  // TODO: implement real signature/AVB check
   return true;
 }
 
 void boot_main_core(void) {
   ESP_LOGI(TAG, "Starting SBL core...");
 
-  init_lvgl_display();   // sets up ST7789/SSD1306 + LVGL
+  // init LED and LED task early so we can show states right away
+  led_init();
+  xTaskCreatePinnedToCore(led_task, "led", 2048, NULL, 6, NULL, tskNO_AFFINITY);
+
+  init_lvgl_display();
   init_encoder();
 
-  // configure SW pin
+  // SW pin
   gpio_set_direction((gpio_num_t)PIN_SW, GPIO_MODE_INPUT);
   gpio_pullup_en((gpio_num_t)PIN_SW);
 
@@ -436,23 +626,21 @@ void boot_main_core(void) {
     ESP_LOGI(TAG, "Recovery button pressed => entering Fastboot (Vendor USB)");
     init_tinyusb();
 
-    // show LVGL label if available
-    if (lv_disp_get_default()) {
-      lv_obj_t *label = lv_label_create(lv_scr_act());
+    led_set_state(LED_STATE_FASTBOOT);
+
+    if (lv_display_get_default()) {
+      lv_obj_t *label = lv_label_create(lv_screen_active());
       lv_label_set_text(label, "Recovery Mode: Connect USB");
       lv_obj_center(label);
     }
 
-    // start vendor fastboot loop as a task
     xTaskCreatePinnedToCore(fastboot_vendor_loop, "fastboot", 8192, NULL, 5, NULL, tskNO_AFFINITY);
-    // keep this task alive to allow fastboot to run; simply block here
-    while (1) {
-      vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    while (1) { vTaskDelay(pdMS_TO_TICKS(1000)); }
     return;
   }
 
-  // normal boot: find OTA partition
+  led_set_state(LED_STATE_NORMAL_BOOT);
+
   const esp_partition_t *app_partition = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
   if (!app_partition) {
     ESP_LOGE(TAG, "No app partition found");
@@ -474,8 +662,14 @@ void boot_main_core(void) {
   }
 }
 
-/* ---------- Arduino entrypoints ---------- */
+/* ---------- TinyUSB init ---------- */
+void init_tinyusb(void) {
+  TinyUSBDevice.begin();
+  ESP_LOGI(TAG, "TinyUSB started");
+  usb_serial.begin(115200);
+}
 
+/* ---------- Arduino entrypoints ---------- */
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -484,45 +678,5 @@ void setup() {
 }
 
 void loop() {
-  // boot_main_core either restarts the board or spins in recovery task.
   vTaskDelay(pdMS_TO_TICKS(1000));
 }
-
-/* ---------- Notes & Next steps (important) ----------
-1) LVGL 9:
-   - This file uses lvgl.h and basic lv_label_* calls which remain stable in LVGL 9.
-   - The display registration here uses lv_disp_drv_t (v8 compatible). LVGL 9 introduced `lv_display_t` APIs.
-     However in many Arduino LVGL 9 builds backward-compatible shim is present.
-   - If your LVGL 9 + Arduino package requires the new v9 registration, replace the lv_disp_drv_t block
-     in init_lvgl_display() with the v9 API from LVGL's v9 examples. I can paste a ready-to-use v9 snippet
-     for your exact LVGL version if you tell me the installed version (or I can attempt the common v9.0.0 code now).
-
-2) TinyUSB + VENDOR:
-   - Ensure Adafruit_TinyUSB library in your Arduino environment exposes the VENDOR class.
-     If `tud_vendor_*` symbols are undefined, you must modify the TinyUSB descriptors found in
-     Adafruit_TinyUSB library (or use a custom tinyusb build).
-   - If VENDOR is not available, the code still works in simplified form with CDC (usb_serial), but that
-     will not be compatible with standard Android `fastboot` client (which expects raw bulk endpoints).
-
-3) ST7789 flush:
-   - Update command sequence (CASET/RASET/RAMWR) to match your panel (8-bit vs 16-bit params).
-   - Ensure `lv_color_t` matches display pixel format; if not, convert each pixel.
-   - For high throughput, adjust max chunk size and use `post_cb` mechanism to queue DMA transfers.
-
-4) Security:
-   - `oem unlock` here is a stub — DO NOT implement eFuse writes or permanent secure-boot actions unless you
-     fully understand consequences and have hardware fuses backed up. I recommend adding multiple confirmations
-     (and physical switch) before performing irreversible operations.
-
-5) If you want: I can now
-   A) Provide exact LVGL v9 registration code for the latest LVGL 9.x (I will assume v9.1 / v9.2 unless you tell version).
-   B) Prepare TinyUSB descriptor patch (device + configuration descriptors) to add VENDOR interface and show the file to paste into Adafruit_TinyUSB.
-   C) Implement full, tested ST7789 init sequence + optimized DMA flush (with post-callback) tuned for a specific panel model (give panel model).
-   D) Convert SSD1306 flush to a real page-buffer packer (if you plan to use SSD1306).
-
-Нужен ли тебе сейчас:
-  1) LVGL v9 exact registration snippet, или
-  2) TinyUSB descriptors for Vendor, или
-  3) Full ST7789 init + optimized DMA flush for конкретную модель?
-
-Напиши цифру (1/2/3) — и я сразу вставлю точный код/патч. Если хочешь всё сразу — скажи «всё» и я дам следующий большой патч прямо в этом ответе. */
