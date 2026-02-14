@@ -1,4 +1,4 @@
-name: Rust
+name: Rust Bootloader Build
 
 on:
   push:
@@ -11,12 +11,17 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run release
-      run: cargo run --release --verbose
+      - uses: actions/checkout@v4
+
+      - name: Build Bootloader
+        # Указываем путь к папке от корня репозитория
+        working-directory: ./bootloader
+        run: cargo build --verbose
+
+      - name: Run release
+        # Здесь тоже указываем рабочую директорию
+        working-directory: ./bootloader
+        run: cargo run --release --verbose
