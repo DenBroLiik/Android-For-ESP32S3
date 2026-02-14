@@ -1,127 +1,218 @@
 # Zephyr Watch 1
 
-**Zephyr Watch 1** — DIY-проект смарт-часов на базе микроконтроллера **ESP32-S3-Zero-N4R2**, вдохновлённый **Google Pixel Watch 3** с Wear OS 6 (Android 16). Цель — создать кастомные часы с уникальным корпусом и функциональностью, близкой к Wear OS: стильный интерфейс в духе **Material You 3**, watchfaces, уведомления, энергоэффективность на Li-ion батарее 400mAh. Прошивка построена на **ESP-IDF v5.3+** с библиотекой **LVGL v9+** для UI.
+<div align="center">
 
-## Цели проекта
-Создать кастомные смарт-часы с:
-- **Дисплеями ST7789 или ssd1306**: Первый цветной (240x240, SPI, шлейфовые с переходником на пины, сенсор XPT2046) а второй обычный чёрно/белый. Прошивка определяет подключённые дисплеи и адаптирует UI (Material You 3, watchfaces, анимации).
-- **Адаптивный UI**: Интерфейс в стиле Material You 3 (rounded cards, dynamic colors, плавные анимации), оптимизированный под цветные дисплеи ST7789.
-- **Взаимодействие**:
-  - Основное: Ротационный энкодер с кнопкой и трещоткой (KY-040 или аналог) для скролла меню и выбора.
-  - Дополнительное: Сенсорный ввод (XPT2046) на ST7789 для тапов/свайпов и уповление энкодером для ssd1306.
-- **Магнитная зарядка**: Модуль TP4056 с магнитными контактами (V+/GND, pogo-pin или площадки). Данные по пинам не передаются (ESP-NOW для связи).
-- **SD-карта**: Хранение пользовательских данных в /sdcard (до 32GB).
-- **Энергоэффективность**: Deep sleep (~0.01-0.05mah), пробуждение по кнопке/энкодеру/сенсору.
+**DIY смарт-часы в стиле Google Pixel Watch 3 на Rust**
 
-## Аппаратное обеспечение
-- **Микроконтроллер**: ESP32-S3-Zero-N4R2 (4MB Flash, 2MB PSRAM, WiFi/BLE).
-- **Дисплеи**:
-  - **SSD1306** (128x64)
-  - **ST7789** (240x240, SPI, шлейф с переходником, пины: GPIO18/SCLK, GPIO23/MOSI, GPIO17/DC, GPIO16/CS, GPIO5/RES; сенсор XPT2046 на GPIO15/TOUCH_CS).
-- **Ротационный энкодер**: KY-040 с кнопкой и трещоткой (пины: GPIO4/CLK, GPIO2/DT, GPIO1/SW, 3.3V, GND, pull-up резисторы 10kΩ).
-- **Зарядка**: TP4056 (Li-ion 400mAh, IN+/IN- через магнитные контакты, BAT+ через диод Шоттки 1N5819 к 5V ESP32, OUT+ через второй диод для load-sharing).
-- **SD-ридер** (опционально): SPI (пины: GPIO9/CS, GPIO11/MOSI, GPIO12/MISO, GPIO10/SCK, 3.3V, GND).
-- **Корпус**: Кастомный, переделанный от детских часов, с вырезами под дисплеи, энкодер и магнитные контакты. Внешний вид уникальный, но функционал эмулирует Pixel Watch 3.
+[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![ESP32-S3](https://img.shields.io/badge/ESP32--S3-E7352C?style=for-the-badge&logo=espressif&logoColor=white)](https://www.espressif.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
-### Схема подключений
+</div>
+
+## О проекте
+
+**Zephyr Watch 1** — это кастомные смарт-часы, созданные с нуля. Проект вдохновлён дизайном Google Pixel Watch 3 и работает на базе микроконтроллера **ESP32-S3-Zero-N4R2**.
+
+### Ключевые особенности
+
+- **Интерфейс Material You 3** — современный адаптивный дизайн с rounded cards и плавными анимациями
+- **Поддержка двух дисплеев** — цветной ST7789 (240×240) и монохромный SSD1306 (128×64)
+- **Гибкое управление** — ротационный энкодер с трещоткой + сенсорный экран (XPT2046)
+- **Магнитная зарядка** — удобная зарядка через pogo-pin контакты
+- **Долгое время работы** — энергоэффективный режим deep sleep (~0.01-0.05 мАч)
+- **Расширяемое хранилище** — поддержка SD-карт до 32GB
+
+---
+
+## Аппаратная часть
+
+### Компоненты
+
+| Компонент | Спецификация | Примечание |
+|-----------|--------------|------------|
+| Микроконтроллер | ESP32-S3-Zero-N4R2 | 4MB Flash, 2MB PSRAM, WiFi/BLE |
+| Основной дисплей | ST7789 | 240×240, SPI, цветной |
+| Дополнительный дисплей | SSD1306 | 128×64, I2C, монохромный |
+| Сенсор | XPT2046 | Резистивный тачскрин |
+| Управление | KY-040 | Энкодер с кнопкой и трещоткой |
+| Батарея | Li-ion | 400 мАч |
+| Зарядка | TP4056 | С магнитными контактами |
+| Хранилище | MicroSD | До 32GB (FAT32) |
+
+### Схема подключения
+
 ```
-[USB Charger] -- [Mag1:V+] -- TP4056(IN+) -- BAT+ -- [Li-ion +] -- 1N5819(A) -- 5V [ESP32]
-                   |                    |                        |
-[Mag2:GND] -- IN- -- BAT- -- [Li-ion -] -- GND [ESP32]
-                   |                    |
-                   OUT+ -- 1N5819(A) -- 5V [ESP32]
+Питание:
+[USB Charger] → [Mag1:V+] → TP4056(IN+) → BAT+ → [Li-ion +] → 1N5819 → 5V [ESP32]
+                                            ↓
+[Mag2:GND] → IN- → BAT- → [Li-ion -] → GND [ESP32]
+                ↓
+                OUT+ → 1N5819 → 5V [ESP32] (load-sharing)
 
-ESP32-S3-Zero:
-- GPIO18,23,17,16,5 -- [ST7789: SCLK, MOSI, DC, CS, RES]
-- GPIO15 -- TOUCH_CS [XPT2046]
-- GPIO4 -- CLK [Encoder]
-- GPIO2 -- DT [Encoder]
-- GPIO1 -- SW [Encoder]
-- GPIO9-12 -- [SD: CS, MOSI, MISO, SCK]
+Дисплей ST7789 (SPI):
+GPIO18 → SCLK
+GPIO23 → MOSI
+GPIO17 → DC
+GPIO16 → CS
+GPIO5  → RES
+
+Сенсор XPT2046:
+GPIO15 → TOUCH_CS
+
+Энкодер KY-040:
+GPIO4 → CLK
+GPIO2 → DT
+GPIO1 → SW
+
+SD-карта (SPI):
+GPIO9  → CS
+GPIO11 → MOSI
+GPIO12 → MISO
+GPIO10 → SCK
 ```
 
-## Программное обеспечение
-- **Фреймворк**: ESP-IDF v5.3+ (espressif.com).
-- **UI**: LVGL v9+ для рендеринга. Адаптация:
-  - Определяет подключённые ST7789 (SPI init для каждого).
-  - Рендерит Material You 3 UI (dynamic colors, rounded cards, анимации) на активном дисплее (или обоих, если оба подключены).
-  - Поддерживает сенсорный ввод (XPT2046) для тапов/свайпов.
-- **Взаимодействие**:
-  - **Энкодер**: Скролл меню/watchfaces (CW/CCW с трещоткой), выбор (нажатие кнопки).
-  - **Сенсор**: Тапы/свайпы для выбора или навигации (опционально, если активен ST7789).
-- **Файловая система**:
-  - **карта памяти - FAT32** (MIN 512MB - 32GB MAX): /system (**~200KB**), /boot(**64KB**), /tmp (**4KB**), /vendor (**~200KB**), /sdcard (**~**).
+---
 
+## Программная часть
 
-### Упрощённая файловая система
-Эмулирует Wear OS 6 FS:
-- **/** (32GB): Сдесь и будут разделы ввиде папок ссылок (/boot, /system и т.д)
-- **/system** (~340KB): UI, конфиги, watchfaces (e.g., /system/fonts/Android.json).
-- **/boot** (max 64KB): Анимация запуска (/boot/bootanimation.json или .bin для LVGL), OTA-метаданные.
-- **/sdcard** (max 32GB, SD): Пользовательские данные (логи, настройки, и т.д).
-- **/tmp** (~4KB): Логи (энкодер, сенсор, батарея, и т.д).
-- **/vendor** (~200KB): Конфиги и драйвера hardware (ST7789, XPT2046, энкодер и т.д).
-- **/dev** (~): Устрйстава
-- **init.rc**: Реализован как `android` (инициализация FS, дисплеев, ввода/вывода и т.д).
+### Стек технологий
 
-**Пример структуры:**
+- **Язык**: [Rust](https://www.rust-lang.org/) (embedded-hal, esp-idf-hal)
+- **Фреймворк**: [esp-idf-sys](https://github.com/esp-rs/esp-idf-sys) / [esp-idf-hal](https://github.com/esp-rs/esp-idf-hal)
+- **UI**: [LVGL](https://lvgl.io/) v9+ (через [lvgl-rs](https://github.com/lvgl/lvgl-rs))
+- **Сборка**: [PlatformIO](https://platformio.org/) или [cargo-espflash](https://github.com/esp-rs/espflash)
+
+### Файловая система
+
+Эмуляция структуры Wear OS 6:
+
 ```
 /
-├── system
-│   └── /fonts/android.json (Material You 3: colors, cards)
-├── boot
-│   └── bootanimation.json (анимация: "Zephyr Boot")
-├── tmp
-│   └── all_log.json (логи: menu_pos, touch)
-├── vendor
-│   └── wlan/xtensa-esp32s3-elf.h
-/sdcard
-└── app/launcher.app
+├── system/          (~340KB)  UI, шрифты, watchfaces, конфигурации
+│   ├── fonts/
+│   ├── app/
+│   └── lib/
+├── boot/            (64KB)    Анимация загрузки, OTA-метаданные
+├── tmp/             (~4KB)    Логи системы
+├── vendor/          (~200KB)  Драйверы hardware
+├── dev/                       Устройства
+└── sdcard/          (32GB)    Пользовательские данные
 ```
 
-**Структура сейчас**
+### Структура проекта
+
 ```
 .
-├── boot
-│   ├── bootanimation.h
-│   └── initrc.c
-├── dev
-├── init.c
-├── partitions.csv
-├── sdcard
-├── system
-│   ├── app
-│   ├── bin
-│   ├── fonts
-│   └── lib
-├── tmp
-└── vendor
-
+├── bootloader/      # Загрузчик
+├── firmware/        # Исходный код на Rust
+│   ├── src/
+│   │   ├── main.rs
+│   │   ├── display/     # Драйверы дисплеев
+│   │   ├── ui/          # Material You 3 UI
+│   │   ├── input/       # Энкодер, тачскрин
+│   │   ├── fs/          # Файловая система
+│   │   └── power/       # Управление питанием
+│   └── Cargo.toml
+├── partitions.csv   # Таблица разделов
+└── README.markdown  # Этот файл
 ```
 
-## Визуальный стиль и взаимодействие
-- **UI (Material You 3)**:
-  - **ST7789**: Полноцветный UI (primary color #2196F3, accent #4CAF50), rounded cards (radius=12), shadows (elevation=4), fade-in анимации.
-  - **Адаптация**: LVGL layouts (flex/grid) масштабируются под 240x240. Если оба дисплея активны, UI рендерится синхронно или переключается по энкодеру.
-  - **Watchfaces**: Время, уведомления, шаги. Загружаются из /system/ui.json.
-  - **Меню**: lv_list с карточками, скролл через энкодер или свайпы (сенсор).
-- **Взаимодействие**:
-  - **Энкодер**: Вращение (CW/CCW с трещоткой) для скролла меню/watchfaces, нажатие кнопки — выбор или запрос UI с N16R8.
-  - **Сенсор** (XPT2046): Тапы для выбора, свайпы для меню (на ST7789, если активны).
-  - **Анимация запуска**: Из /boot/bootanimation.json (LVGL-анимация: текст или графика для ST7789 типо .bin).
-- **Дисплеи**: Прошивка проверяет SPI (GPIO16/26 для CS) и инициализирует подключённые ST7789/ssd1306. Один или оба могут быть активны.
+---
 
-## Реализация
-- **ESP32-S3-Zero (часы)**: Прошивка в `Zephyr_Watch/firmware/`:
-  - **Инициализация**: Проверяет ST7789 (SPI init) или i2c для ssd1306, сенсоры (XPT2046), монтирует FAT32 (/system, /boot, /tmp, /vendor, /dev, /sdcard) и SD (/sdcard), инициализирует энкодер, ESP-NOW.
-  - **UI**: LVGL рендерит Material You 3 UI на активном ST7789 (или обоих).
-  - **Deep sleep**: Через 10 сек бездействия, пробуждение по кнопке/энкодеру/сенсору.
+## Быстрый старт
 
+### Требования
 
+- [Rust](https://rustup.rs/) (latest stable)
+- [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) v5.3+
+- [cargo-espflash](https://github.com/esp-rs/espflash)
+- [espup](https://github.com/esp-rs/espup) (для настройки toolchain)
 
-## Зависимости
-- arduino ide
-- ESP-IDF v5.3+ (espressif.com)
-- LVGL v9+ (github.com/lvgl/lvgl)
-- ArduinoJson (для UI парсинга, опционально)
-- Fritzing/KiCad для схемы (опционально)
+### Установка toolchain
+
+```bash
+# Установка espup
+cargo install espup
+
+# Установка ESP-IDF toolchain
+espup install
+
+# Активация окружения
+source $HOME/export-esp.sh
+```
+
+### Сборка и прошивка
+
+```bash
+# Клонирование репозитория
+git clone https://github.com/yourusername/Zephyr-Watch-1.git
+cd Zephyr-Watch-1/firmware
+
+# Сборка
+cargo build --release
+
+# Прошивка (автоопределение порта)
+cargo espflash flash --release --monitor
+
+# Или с указанием порта
+cargo espflash flash --release --port /dev/ttyUSB0 --monitor
+```
+
+---
+
+## Функциональность
+
+### Управление
+
+- **Энкодер**:
+  - Вращение — навигация по меню
+  - Нажатие — выбор/подтверждение
+  - Двойное нажатие — возврат назад
+
+- **Сенсорный экран** (ST7789):
+  - Тап — выбор элемента
+  - Свайп — прокрутка/переключение экранов
+
+### Экраны
+
+- **Watchface** — главный циферблат с временем, датой, уведомлениями
+- **Меню приложений** — список установленных приложений
+- **Настройки** — яркость, звук, WiFi, Bluetooth
+- **Уведомления** — входящие уведомления с телефона
+
+### Энергосбережение
+
+- Автоматический переход в deep sleep через 10 сек бездействия
+- Пробуждение по:
+  - Нажатию кнопки энкодера
+  - Вращению энкодера
+  - Касанию экрана
+
+---
+
+## Roadmap
+
+- [x] Базовая инициализация hardware
+- [x] Поддержка ST7789 и SSD1306
+- [x] Интерфейс Material You 3
+- [x] Управление энкодером
+- [ ] Поддержка XPT2046 (тачскрин)
+- [ ] Watchfaces с конфигурацией
+- [ ] Уведомления через ESP-NOW
+- [ ] OTA-обновления
+- [ ] SDK для сторонних приложений
+
+---
+
+## Лицензия
+
+Этот проект распространяется под лицензией MIT. См. [LICENSE](LICENSE) для подробностей.
+
+---
+
+<div align="center">
+
+**Made with ❤️ and Rust**
+
+</div>
