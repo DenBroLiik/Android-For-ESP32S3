@@ -16,16 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Устанавливаем специальный компилятор Rust для ESP32
+      # 1. Устанавка специального компилятора Rust для ESP32
       - name: Install ESP Rust Toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32s3
 
-      # 2. Собираем загрузчик
+      # 2. Соборка загрузчика
       - name: Build Bootloader
         working-directory: ./bootloader
-        run: cargo build --release --verbose
+        run: |
+          . /home/runner/exports
+          cargo +esp build --release --verbose
 
-      # ВНИМАНИЕ: Я убрал шаг `cargo run`
