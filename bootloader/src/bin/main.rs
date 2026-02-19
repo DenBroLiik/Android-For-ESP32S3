@@ -16,7 +16,7 @@ fn init() {
     // Initialize heap allocator
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     let _peripherals = esp_hal::init(config);
 }
 
