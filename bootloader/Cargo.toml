@@ -11,7 +11,7 @@ path = "./src/bin/main.rs"
 [dependencies]
 esp-hal = { version = "~1.0.0", features = ["esp32s3", "unstable"] }
 
-
+embedded-alloc = "0.7.0"
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }
 
 critical-section = "1.2.0"

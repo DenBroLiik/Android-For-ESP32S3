@@ -51,6 +51,7 @@ name = "bootloader"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "embedded-alloc",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -273,6 +274,18 @@ dependencies = [
  "critical-section",
  "embassy-sync 0.7.2",
  "embassy-usb-driver",
+]
+
+[[package]]
+name = "embedded-alloc"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2db634e07f552215f7a3572dc0a4d29760c637fcea5a8c18d2cc291f782c216c"
+dependencies = [
+ "const-default",
+ "critical-section",
+ "linked_list_allocator",
+ "rlsf",
 ]
 
 [[package]]
