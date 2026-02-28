@@ -1,0 +1,8 @@
+[submodule "Bootloader"]
+	path = Bootloader
+	url = https://github.com/DenBroLiik/Android-For-ESP32S3.git
+	branch = Bootloader
+[submodule "Firmware"]
+	path = Firmware
+	url = https://github.com/DenBroLiik/Android-For-ESP32S3.git
+	branch = Firmware
