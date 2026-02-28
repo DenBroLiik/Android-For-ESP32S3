@@ -25,7 +25,7 @@ jobs:
 
       # 2. Соборка загрузчика
       - name: Build Bootloader
-        working-directory: ./Bootloader
+        working-directory: .
         run: |
           . /home/runner/exports
           cargo +esp build --release --verbose
