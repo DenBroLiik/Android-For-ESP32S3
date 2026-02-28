@@ -2,9 +2,9 @@ name: Rust Bootloader Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "Bootloader" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "Bootloader" ]
 
 env:
   CARGO_TERM_COLOR: always
