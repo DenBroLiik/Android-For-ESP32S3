@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
@@ -16,17 +17,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Устанавка специального компилятора Rust для ESP32
+      # 1. Установка специального компилятора Rust для ESP32
       - name: Install ESP Rust Toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32s3
+          ldproxy: true  # Обязательно для esp-idf проектов
 
-      # 2. Соборка загрузчика
+      # 2. Сборка загрузчика
       - name: Build Bootloader
-        working-directory: .
+        working-directory: ./Bootloader  # Путь к директории с Cargo.toml
         run: |
-          . /home/runner/exports
+          source ${ESPUP_EXPORT_FILE:-$HOME/export-esp.sh}
           cargo +esp build --release --verbose
-
