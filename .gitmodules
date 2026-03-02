@@ -6,3 +6,7 @@
 	path = Firmware
 	url = https://github.com/DenBroLiik/Android-For-ESP32S3.git
 	branch = Firmware
+[submodule "App"]
+	path = App
+	url = https://github.com/DenBroLiik/Android-For-ESP32S3.git
+	branch = App
