@@ -1,5 +1,5 @@
 #!/bin/bash
-source /home/denbroliik/export-esp.sh
+source ~/export-esp.sh
 
 # Build the bootloader
 sudo -E PATH="$PATH" cargo build --release --bin bootloader

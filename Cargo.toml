@@ -23,6 +23,7 @@ esp-backtrace = { version = "0.18.1", features = [
 ] }
 esp-println = { version = "0.16.1", features = ["esp32s3"] }
 
+rhai = { path = "./rhai", default-features = false, features = ["no_std", "only_i32", "no_float", "no_index", "no_object"] }
 
 [profile.dev]
 # Rust debug is too slow.
