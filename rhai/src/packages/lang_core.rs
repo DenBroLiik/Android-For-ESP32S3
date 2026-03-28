@@ -2,7 +2,6 @@ use crate::def_package;
 use crate::plugin::*;
 use crate::types::dynamic::Tag;
 use crate::{Dynamic, RhaiResult, RhaiResultOf, ERR, INT};
-use std::convert::TryFrom;
 #[cfg(feature = "no_std")]
 use std::prelude::v1::*;
 
