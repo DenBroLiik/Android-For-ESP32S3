@@ -4,9 +4,13 @@ use esp_hal::{
 };
 
 const SSD1306_ADDR: u8 = 0x3C;
+const WIDTH: usize = 128;
+const HEIGHT: usize = 64;
+const PAGES: usize = HEIGHT / 8;
 
 pub struct Ssd1306Display<'d> {
     i2c: I2c<'d, Blocking>,
+    framebuffer: [u8; WIDTH * PAGES],
 }
 
 impl<'d> Ssd1306Display<'d> {
@@ -20,41 +24,133 @@ impl<'d> Ssd1306Display<'d> {
             write_command(&mut i2c, command)?;
         }
 
-        let mut display = Self { i2c };
+        let mut display = Self {
+            i2c,
+            framebuffer: [0u8; WIDTH * PAGES],
+        };
         display.clear()?;
         Ok(display)
     }
 
     pub fn clear(&mut self) -> Result<(), ()> {
-        for page in 0..8 {
-            self.set_cursor(page, 0)?;
-            let mut buffer = [0u8; 17];
-            buffer[0] = 0x40;
-            for _ in 0..8 {
-                self.i2c.write(SSD1306_ADDR, &buffer).map_err(|_| ())?;
-            }
-        }
-        Ok(())
+        self.framebuffer.fill(0);
+        self.flush()
     }
 
     pub fn show_lines(&mut self, lines: [&str; 4]) -> Result<(), ()> {
-        self.clear()?;
+        self.framebuffer.fill(0);
         for (row, line) in lines.iter().enumerate() {
-            self.draw_text_line(row as u8, line)?;
+            self.draw_text(0, (row as i16) * 16, line, 2, true);
         }
-        Ok(())
+        self.flush()
     }
 
-    fn draw_text_line(&mut self, row: u8, text: &str) -> Result<(), ()> {
-        self.set_cursor(row, 0)?;
+    pub fn show_fastboot_logo(&mut self) -> Result<(), ()> {
+        self.framebuffer.fill(0);
+
+        let title = "FASTBOOT";
+        let title_scale = 2;
+        let title_width = text_width(title, title_scale, title_scale as i16);
+        let title_x = ((WIDTH as i16 - title_width).max(0)) / 2;
+        let title_y = 18;
+
+        self.draw_text(title_x + 2, title_y + 2, title, title_scale, false);
+        self.draw_text(title_x, title_y, title, title_scale, true);
+
+        let subtitle = "Zephyr";
+        let subtitle_scale = 1;
+        let subtitle_spacing = 0;
+        let subtitle_width = text_width(subtitle, subtitle_scale, subtitle_spacing);
+        let subtitle_x = ((WIDTH as i16 - subtitle_width).max(0)) / 2;
+        let subtitle_y = 54;
+
+        self.draw_text_with_spacing(
+            subtitle_x,
+            subtitle_y,
+            subtitle,
+            subtitle_scale,
+            subtitle_spacing,
+            true,
+        );
+
+        self.flush()
+    }
+
+    fn draw_text(&mut self, x: i16, y: i16, text: &str, scale: u8, on: bool) {
+        self.draw_text_with_spacing(x, y, text, scale, scale as i16, on);
+    }
+
+    fn draw_text_with_spacing(
+        &mut self,
+        x: i16,
+        y: i16,
+        text: &str,
+        scale: u8,
+        spacing: i16,
+        on: bool,
+    ) {
+        let mut cursor_x = x;
+        let step = (5 * scale as i16) + spacing;
+
         for ch in text.bytes().take(21) {
-            let glyph = glyph(ch.to_ascii_uppercase());
-            let mut packet = [0u8; 7];
-            packet[0] = 0x40;
-            packet[1..6].copy_from_slice(&glyph);
-            packet[6] = 0x00;
-            self.i2c.write(SSD1306_ADDR, &packet).map_err(|_| ())?;
+            self.draw_glyph(cursor_x, y, ch.to_ascii_uppercase(), scale, on);
+            cursor_x += step;
         }
+    }
+
+    fn draw_glyph(&mut self, x: i16, y: i16, ch: u8, scale: u8, on: bool) {
+        let glyph = glyph(ch);
+        let scale = scale.max(1) as i16;
+
+        for (column_index, column) in glyph.iter().enumerate() {
+            for row in 0..7 {
+                if (column >> row) & 0x01 == 0 {
+                    continue;
+                }
+
+                let base_x = x + (column_index as i16 * scale);
+                let base_y = y + (row as i16 * scale);
+
+                for dx in 0..scale {
+                    for dy in 0..scale {
+                        self.set_pixel(base_x + dx, base_y + dy, on);
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_pixel(&mut self, x: i16, y: i16, on: bool) {
+        if x < 0 || y < 0 || x >= WIDTH as i16 || y >= HEIGHT as i16 {
+            return;
+        }
+
+        let x = x as usize;
+        let y = y as usize;
+        let index = x + (y / 8) * WIDTH;
+        let mask = 1u8 << (y % 8);
+
+        if on {
+            self.framebuffer[index] |= mask;
+        } else {
+            self.framebuffer[index] &= !mask;
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), ()> {
+        for page in 0..PAGES {
+            self.set_cursor(page as u8, 0)?;
+
+            for chunk in self.framebuffer[page * WIDTH..(page + 1) * WIDTH].chunks(16) {
+                let mut packet = [0u8; 17];
+                packet[0] = 0x40;
+                packet[1..1 + chunk.len()].copy_from_slice(chunk);
+                self.i2c
+                    .write(SSD1306_ADDR, &packet[..1 + chunk.len()])
+                    .map_err(|_| ())?;
+            }
+        }
+
         Ok(())
     }
 
@@ -68,6 +164,15 @@ impl<'d> Ssd1306Display<'d> {
 
 fn write_command(i2c: &mut I2c<'_, Blocking>, command: u8) -> Result<(), ()> {
     i2c.write(SSD1306_ADDR, &[0x00, command]).map_err(|_| ())
+}
+
+fn text_width(text: &str, scale: u8, spacing: i16) -> i16 {
+    let chars = text.chars().take(21).count() as i16;
+    if chars == 0 {
+        0
+    } else {
+        chars * ((5 * scale as i16) + spacing) - spacing
+    }
 }
 
 fn glyph(ch: u8) -> [u8; 5] {

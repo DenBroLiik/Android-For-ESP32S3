@@ -3,7 +3,10 @@ use esp_println::println;
 
 use crate::{
     components::{board::Board, boot::BootError, diagnostics::log_memory},
-    vendor::{fastboot::{FastbootCommand, FastbootPlus}, rtc},
+    vendor::{
+        fastboot::{FastbootCommand, FastbootPlus},
+        rtc,
+    },
     xtensa_lx7_cpu_to_gpu::XtensaLx7CpuToGpu,
     vendor::ram::RAM,
 };
@@ -24,7 +27,7 @@ fn print_menu(fastboot: &mut FastbootPlus<'_>) {
     fastboot.write_line("fastboot+ quick actions:");
     fastboot.write_line("  status   pins   memory   rtc");
     fastboot.write_line("  logs on  logs off");
-    fastboot.write_line("  led startup / led fastboot / led success / led write / led error / led off");
+    fastboot.write_line("  led R G B BRT  e.g. led 255 128 0 4");
     fastboot.write_line("  boot     reboot");
     fastboot.write_prompt();
 }
@@ -54,11 +57,9 @@ pub fn enter_fastboot(
     #[derive(Clone, Copy, PartialEq)]
     enum LedMode {
         Fastboot, // solid amber — default
-        Write,    // blink yellow
         Manual,   // user set a specific color, hold it
     }
     let mut led_mode = LedMode::Fastboot;
-    let mut write_blink_state = false;
 
     // Initial solid amber.
     board.status_led.show_fastboot(delay);
@@ -94,10 +95,10 @@ pub fn enter_fastboot(
                 FastbootCommand::Pins => {
                     fastboot.write_line("Pin map:");
                     fastboot.write_line("  RGB_LED=21");
-                    fastboot.write_line("  SD: CS=12 CLK=9 MOSI=11 MISO=10 CD=none");
+                    fastboot.write_line("  SD: CS=12 CLK=disabled MOSI=11 MISO=10 CD=none");
                     fastboot.write_line("  DISPLAY: SDA=2 SCL=1");
-                    fastboot.write_line("  ENCODER=8");
-                    fastboot.write_line("  POWER_BUTTON=7");
+                    fastboot.write_line("  ENCODER: A=8 B=7");
+                    fastboot.write_line("  POWER_BUTTON=9");
                     fastboot.write_prompt();
                 }
                 FastbootCommand::Memory => {
@@ -128,40 +129,14 @@ pub fn enter_fastboot(
                     fastboot.write_line("Live fastboot logs disabled.");
                     fastboot.write_prompt();
                 }
-                FastbootCommand::LedOff => {
+                FastbootCommand::Led { color, brightness } => {
                     led_mode = LedMode::Manual;
-                    board.status_led.off(delay);
-                    fastboot.write_line("LED -> off");
-                    fastboot.write_prompt();
-                }
-                FastbootCommand::LedError => {
-                    led_mode = LedMode::Manual;
-                    board.status_led.show_error(delay);
-                    fastboot.write_line("LED -> error(red)");
-                    fastboot.write_prompt();
-                }
-                FastbootCommand::LedStartup => {
-                    led_mode = LedMode::Manual;
-                    board.status_led.show_startup(delay);
-                    fastboot.write_line("LED -> startup(blue)");
-                    fastboot.write_prompt();
-                }
-                FastbootCommand::LedFastboot => {
-                    led_mode = LedMode::Fastboot;
-                    board.status_led.show_fastboot(delay);
-                    fastboot.write_line("LED -> fastboot(amber)");
-                    fastboot.write_prompt();
-                }
-                FastbootCommand::LedSuccess => {
-                    led_mode = LedMode::Manual;
-                    board.status_led.show_success(delay);
-                    fastboot.write_line("LED -> success(green)");
-                    fastboot.write_prompt();
-                }
-                FastbootCommand::LedWrite => {
-                    led_mode = LedMode::Write;
-                    write_blink_state = false;
-                    fastboot.write_line("LED -> write(yellow)");
+                    let scaled = color.with_brightness(brightness);
+                    board.status_led.show(delay, scaled);
+                    fastboot.write_fmt_line(format_args!(
+                        "LED -> rgb({}, {}, {}) brightness {}",
+                        color.red, color.green, color.blue, brightness
+                    ));
                     fastboot.write_prompt();
                 }
                 FastbootCommand::Boot => {
@@ -192,25 +167,19 @@ pub fn enter_fastboot(
             }
         }
 
+        if let Some(torch_enabled) = board.poll_torch_toggle(delay) {
+            fastboot.write_line(if torch_enabled {
+                "Torch -> ON"
+            } else {
+                "Torch -> OFF"
+            });
+            fastboot.write_prompt();
+        }
+
         // LED mode dispatch — runs every 100 ms tick.
         match led_mode {
-            LedMode::Fastboot => {
-                // Solid amber — nothing to do, already set on entry and on command.
-            }
-            LedMode::Write => {
-                // Blink yellow every 500 ms (5 ticks × 100 ms).
-                if ticker % 5 == 0 {
-                    if write_blink_state {
-                        board.status_led.show_write(delay);
-                    } else {
-                        board.status_led.off(delay);
-                    }
-                    write_blink_state = !write_blink_state;
-                }
-            }
-            LedMode::Manual => {
-                // Color was set by the command — hold it, do nothing.
-            }
+            LedMode::Fastboot => {}
+            LedMode::Manual => {}
         }
         ticker = ticker.wrapping_add(1);
 
