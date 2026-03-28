@@ -40,6 +40,7 @@ where
 }
 
 // Range iterator with step
+#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub struct StepRange<T> {
     /// Start of the range.

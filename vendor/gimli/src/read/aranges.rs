@@ -289,11 +289,12 @@ impl<R: Reader> ArangeEntryIter<R> {
     /// The raw range should have been obtained from `next_raw`.
     #[doc(hidden)]
     pub fn convert_raw(&self, mut entry: ArangeEntry) -> Result<Option<ArangeEntry>> {
-        // Skip negative tombstone entries.
-        // Callers must handle tombstones of 0 or greater themselves
-        // because we have no way of knowing if they are valid or not.
+        // Skip tombstone entries.
+        // DWARF specifies a tombstone value of -1, but many linkers use 0.
+        // However, 0 may be a valid address, so the caller must handle that case.
         let address_size = self.encoding.address_size;
-        if entry.range.begin >= u64::min_tombstone(address_size) {
+        let tombstone_address = !0 >> (64 - self.encoding.address_size * 8);
+        if entry.range.begin == tombstone_address {
             return Ok(None);
         }
 

@@ -1,5 +1,4 @@
 mod cache;
-mod chaining;
 mod data_check;
 mod debugger;
 mod eval_context;

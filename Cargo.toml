@@ -25,6 +25,9 @@ esp-println = { version = "0.16.1", features = ["esp32s3"] }
 
 rhai = { path = "./rhai", default-features = false, features = ["no_std", "only_i32", "no_float", "no_index", "no_object"] }
 
+[patch.crates-io]
+esp-rom-sys = { path = "./vendor/esp-rom-sys" }
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
