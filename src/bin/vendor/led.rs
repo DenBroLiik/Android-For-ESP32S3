@@ -21,6 +21,16 @@ impl RgbColor {
     pub const fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
+
+    pub fn with_brightness(self, brightness: u8) -> Self {
+        let level = brightness.min(10) as u16;
+
+        Self {
+            red: ((self.red as u16 * level) / 10) as u8,
+            green: ((self.green as u16 * level) / 10) as u8,
+            blue: ((self.blue as u16 * level) / 10) as u8,
+        }
+    }
 }
 
 pub struct StatusLed<'d> {

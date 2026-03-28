@@ -59,7 +59,7 @@ pub fn run_bootloader(
     if !board.sd_card_present() {
         println!("Boot halted: no SD card detected, switching to fastboot.");
         board.status_led.show_error(delay);
-        board.show_display_lines(["FASTBOOT+", "SD FAIL", "USE CONSOLE", ""]);
+        board.show_fastboot_logo();
         match enter_fastboot(
             board,
             delay,
@@ -126,6 +126,17 @@ pub fn run_bootloader(
         rtc::rtc_tick();
         counter += 1;
 
+        for _ in 0..20 {
+            if let Some(torch_enabled) = board.poll_torch_toggle(delay) {
+                println!(
+                    "Torch button on GPIO9 -> {}",
+                    if torch_enabled { "ON" } else { "OFF" }
+                );
+            }
+
+            delay.delay_millis(50);
+        }
+
         let (year, month, day) = rtc::get_date();
         let (hour, minute, second) = rtc::get_time();
 
@@ -144,7 +155,5 @@ pub fn run_bootloader(
             board.power_button_pressed(),
             board.encoder_active()
         );
-
-        delay.delay_millis(1000);
     }
 }

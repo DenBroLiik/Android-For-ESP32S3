@@ -2,6 +2,8 @@ use core::fmt::Write;
 
 use esp_hal::{Blocking, usb_serial_jtag::UsbSerialJtag};
 
+use crate::vendor::led::RgbColor;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FastbootCommand {
     Help,
@@ -13,12 +15,7 @@ pub enum FastbootCommand {
     LogsOff,
     Boot,
     Reboot,
-    LedOff,
-    LedError,
-    LedSuccess,
-    LedStartup,
-    LedFastboot,
-    LedWrite,
+    Led { color: RgbColor, brightness: u8 },
     Unknown,
 }
 
@@ -53,12 +50,8 @@ impl<'d> FastbootPlus<'d> {
         self.write_line("  rtc          - current RTC date/time");
         self.write_line("  logs on      - enable live fastboot logs");
         self.write_line("  logs off     - disable live fastboot logs");
-        self.write_line("  led off      - turn status LED off");
-        self.write_line("  led error    - red error indication");
-        self.write_line("  led success  - green success indication");
-        self.write_line("  led startup  - blue startup indication");
-        self.write_line("  led fastboot - amber fastboot indication");
-        self.write_line("  led write    - yellow write indication");
+        self.write_line("  led R G B BRT - set LED color, brightness 0..10");
+        self.write_line("                 e.g. `led 255 64 0 3` or `led 255 64 0`");
         self.write_line("  boot         - try continuing boot");
         self.write_line("  reboot       - software reset");
         self.write_prompt();
@@ -113,6 +106,10 @@ impl<'d> FastbootPlus<'d> {
 fn parse_command(raw: &[u8]) -> FastbootCommand {
     let command = trim_ascii(raw);
 
+    if let Some((color, brightness)) = parse_led_command(command) {
+        return FastbootCommand::Led { color, brightness };
+    }
+
     match command {
         b"help" => FastbootCommand::Help,
         b"status" => FastbootCommand::Status,
@@ -123,14 +120,56 @@ fn parse_command(raw: &[u8]) -> FastbootCommand {
         b"logs off" => FastbootCommand::LogsOff,
         b"boot" => FastbootCommand::Boot,
         b"reboot" => FastbootCommand::Reboot,
-        b"led off" => FastbootCommand::LedOff,
-        b"led error" => FastbootCommand::LedError,
-        b"led success" => FastbootCommand::LedSuccess,
-        b"led startup" => FastbootCommand::LedStartup,
-        b"led fastboot" => FastbootCommand::LedFastboot,
-        b"led write" => FastbootCommand::LedWrite,
         _ => FastbootCommand::Unknown,
     }
+}
+
+fn parse_led_command(command: &[u8]) -> Option<(RgbColor, u8)> {
+    let mut parts = command.split(|byte| byte.is_ascii_whitespace());
+
+    match parts.next() {
+        Some(b"led") => {}
+        _ => return None,
+    }
+
+    let red = parse_u8(parts.next()?)?;
+    let green = parse_u8(parts.next()?)?;
+    let blue = parse_u8(parts.next()?)?;
+    let brightness = match parts.next() {
+        Some(bytes) if !bytes.is_empty() => parse_brightness(bytes)?,
+        _ => 10,
+    };
+
+    if parts.any(|part| !part.is_empty()) {
+        return None;
+    }
+
+    Some((RgbColor::new(red, green, blue), brightness))
+}
+
+fn parse_u8(bytes: &[u8]) -> Option<u8> {
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut value: u16 = 0;
+    for byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+
+        value = value * 10 + u16::from(byte - b'0');
+        if value > u16::from(u8::MAX) {
+            return None;
+        }
+    }
+
+    Some(value as u8)
+}
+
+fn parse_brightness(bytes: &[u8]) -> Option<u8> {
+    let value = parse_u8(bytes)?;
+    (value <= 10).then_some(value)
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {

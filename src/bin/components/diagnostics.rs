@@ -2,8 +2,8 @@ use esp_println::println;
 
 use crate::{
     components::board::{
-        Board, PIN_DISPLAY_SCL, PIN_DISPLAY_SDA, PIN_ENCODER, PIN_POWER_BUTTON, PIN_SD_CLK,
-        PIN_SD_CS, PIN_SD_MISO, PIN_SD_MOSI, PIN_STATUS_LED,
+        Board, PIN_DISPLAY_SCL, PIN_DISPLAY_SDA, PIN_ENCODER_A, PIN_ENCODER_B,
+        PIN_POWER_BUTTON, PIN_SD_CS, PIN_SD_MISO, PIN_SD_MOSI, PIN_STATUS_LED,
     },
     xtensa_lx7_cpu_to_gpu::XtensaLx7CpuToGpu,
     vendor::ram::RAM,
@@ -11,15 +11,15 @@ use crate::{
 
 pub fn log_component_map() {
     println!(
-        "Pins: RGB_LED={} SD[CS={},CLK={},MOSI={},MISO={},CD=none] DISP[SDA={},SCL={}] ENCODER={} POWER_BTN={}",
+        "Pins: RGB_LED={} SD[CS={},CLK=disabled,MOSI={},MISO={},CD=none] DISP[SDA={},SCL={}] ENCODER[A={},B={}] POWER_BTN={}",
         PIN_STATUS_LED,
         PIN_SD_CS,
-        PIN_SD_CLK,
         PIN_SD_MOSI,
         PIN_SD_MISO,
         PIN_DISPLAY_SDA,
         PIN_DISPLAY_SCL,
-        PIN_ENCODER,
+        PIN_ENCODER_A,
+        PIN_ENCODER_B,
         PIN_POWER_BUTTON
     );
 }
