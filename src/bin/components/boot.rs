@@ -127,6 +127,8 @@ pub fn run_bootloader(
         counter += 1;
 
         for _ in 0..20 {
+            let _ = board.poll_encoder_color_adjust(delay);
+
             if let Some(torch_enabled) = board.poll_torch_toggle(delay) {
                 println!(
                     "Torch button on GPIO9 -> {}",

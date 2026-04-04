@@ -20,6 +20,17 @@ pub const PIN_ENCODER_A: u8 = 8;
 pub const PIN_ENCODER_B: u8 = 7;
 pub const PIN_POWER_BUTTON: u8 = 9;
 
+const ENCODER_COLOR_PALETTE: [RgbColor; 8] = [
+    RgbColor::new(255, 0, 0),
+    RgbColor::new(255, 96, 0),
+    RgbColor::new(255, 255, 0),
+    RgbColor::new(0, 255, 0),
+    RgbColor::new(0, 255, 255),
+    RgbColor::new(0, 0, 255),
+    RgbColor::new(180, 0, 255),
+    RgbColor::new(255, 255, 255),
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SdStatus {
     NoResponse,
@@ -57,6 +68,8 @@ pub struct Board<'d> {
     torch_enabled: bool,
     power_click_count: u8,
     power_click_window_ticks: u8,
+    encoder_state: u8,
+    encoder_color_index: usize,
 }
 
 impl<'d> Board<'d> {
@@ -92,6 +105,8 @@ impl<'d> Board<'d> {
             DisplayStatus::Deferred
         };
 
+        let encoder_state = ((encoder_a.is_low() as u8) << 1) | (encoder_b.is_low() as u8);
+
         Self {
             status_led,
             encoder_a,
@@ -104,6 +119,8 @@ impl<'d> Board<'d> {
             torch_enabled: false,
             power_click_count: 0,
             power_click_window_ticks: 0,
+            encoder_state,
+            encoder_color_index: 0,
         }
     }
 
@@ -142,6 +159,34 @@ impl<'d> Board<'d> {
         if let Some(display) = self.display.as_mut() {
             let _ = display.show_fastboot_logo();
         }
+    }
+
+    pub fn poll_encoder_color_adjust(&mut self, delay: &Delay) -> Option<RgbColor> {
+        let current_state = ((self.encoder_a.is_low() as u8) << 1) | (self.encoder_b.is_low() as u8);
+        let transition = (self.encoder_state << 2) | current_state;
+        self.encoder_state = current_state;
+
+        let delta = match transition {
+            0b0001 | 0b0111 | 0b1110 | 0b1000 => 1i8,
+            0b0010 | 0b0100 | 0b1101 | 0b1011 => -1i8,
+            _ => 0,
+        };
+
+        if delta == 0 || !self.power_button_pressed() {
+            return None;
+        }
+
+        self.power_click_count = 0;
+        self.power_click_window_ticks = 0;
+
+        let len = ENCODER_COLOR_PALETTE.len() as i32;
+        let next = (self.encoder_color_index as i32 + delta as i32).rem_euclid(len) as usize;
+        self.encoder_color_index = next;
+
+        let color = ENCODER_COLOR_PALETTE[self.encoder_color_index];
+        self.torch_enabled = true;
+        self.status_led.show(delay, color);
+        Some(color)
     }
 
     pub fn poll_torch_toggle(&mut self, delay: &Delay) -> Option<bool> {

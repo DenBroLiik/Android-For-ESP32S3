@@ -167,13 +167,14 @@ pub fn enter_fastboot(
             }
         }
 
-        if let Some(torch_enabled) = board.poll_torch_toggle(delay) {
-            fastboot.write_line(if torch_enabled {
-                "Torch -> ON"
-            } else {
-                "Torch -> OFF"
-            });
-            fastboot.write_prompt();
+        if board.poll_encoder_color_adjust(delay).is_some() {
+            led_mode = LedMode::Manual;
+        }
+
+        if board.poll_torch_toggle(delay).is_some() {
+            // Keep the torch toggle independent from USB monitor presence.
+            // Writing to USB Serial/JTAG without an attached host can stall
+            // the fastboot loop after a few buffered messages.
         }
 
         // LED mode dispatch — runs every 100 ms tick.
@@ -193,6 +194,6 @@ pub fn enter_fastboot(
             );
         }
 
-        delay.delay_millis(100);
+        delay.delay_millis(50);
     }
 }
