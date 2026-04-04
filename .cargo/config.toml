@@ -17,7 +17,7 @@ git = "https://gitlab.com/jD91mZM2/no-std-compat.git"
 replace-with = "vendored-sources"
 
 [source.vendored-sources]
-directory = "vendor"
+directory = "Bootloader/vendor"
 
 [unstable]
 build-std = ["alloc", "core"]
