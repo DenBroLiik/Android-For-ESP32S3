@@ -28,6 +28,9 @@ rhai = { path = "./rhai", default-features = false, features = ["no_std", "only_
 [patch.crates-io]
 esp-rom-sys = { path = "./vendor/esp-rom-sys" }
 
+[patch."https://gitlab.com/jD91mZM2/no-std-compat.git"]
+no-std-compat = { path = "./vendor/no-std-compat" }
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

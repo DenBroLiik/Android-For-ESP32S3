@@ -73,6 +73,7 @@ pub struct Board<'d> {
 }
 
 impl<'d> Board<'d> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         _spi2: impl esp_hal::spi::master::Instance + 'd,
         i2c0: impl esp_hal::i2c::master::Instance + 'd,

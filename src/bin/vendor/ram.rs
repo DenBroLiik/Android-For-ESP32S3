@@ -6,6 +6,7 @@ pub enum MemoryError {
     GpuWriteOutOfBounds,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct RAM {
     bootloader_reserved_bytes: usize,
     gpu_reserved_bytes: usize,

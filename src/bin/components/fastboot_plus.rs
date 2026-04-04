@@ -184,7 +184,7 @@ pub fn enter_fastboot(
         }
         ticker = ticker.wrapping_add(1);
 
-        if stream_logs && ticker % 10 == 0 {
+        if stream_logs && ticker.is_multiple_of(10) {
             println!(
                 "[fastboot+] sd_present={} sd_status={} encoder_active={} power_pressed={}",
                 board.sd_card_present(),
