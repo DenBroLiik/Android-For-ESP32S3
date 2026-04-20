@@ -9,15 +9,21 @@ rustflags = [
 ]
 target = "xtensa-esp32s3-none-elf"
 
-[source.crates-io]
-replace-with = "vendored-sources"
+# [source.crates-io]
+# replace-with = "vendored-sources"
 
-[source."git+https://gitlab.com/jD91mZM2/no-std-compat.git"]
-git = "https://gitlab.com/jD91mZM2/no-std-compat.git"
+# [source."git+https://gitlab.com/jD91mZM2/no-std-compat.git"]
+# git = "https://gitlab.com/jD91mZM2/no-std-compat.git"
+# replace-with = "vendored-sources"
+
+# [source.vendored-sources]
+# directory = "vendor"
+
+# [unstable]
+# build-std = ["alloc", "core"]
+
+[source.crates-io]
 replace-with = "vendored-sources"
 
 [source.vendored-sources]
 directory = "vendor"
-
-[unstable]
-build-std = ["alloc", "core"]
