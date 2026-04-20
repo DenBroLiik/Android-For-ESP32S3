@@ -16,17 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Установка специального компилятора Rust для ESP32
       - name: Install ESP Rust Toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32s3
-          ldproxy: true  # Обязательно для esp-idf проектов
+          ldproxy: true
 
-      # 2. Сборка загрузчика
       - name: Build Bootloader
-        working-directory: ./Bootloader  # Путь к директории с Cargo.toml
-        run: |
-          source ${ESPUP_EXPORT_FILE:-$HOME/export-esp.sh}
-          cargo +esp build --release --verbose
+        working-directory: ./Bootloader
+        run: cargo build --release --verbose
