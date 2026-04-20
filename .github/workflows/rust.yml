@@ -1,10 +1,10 @@
-name: Rust Bootloader Build
+name: Rust
 
 on:
   push:
-    branches: [ "Bootloader" ]
+    branches: [ "Documentation", "Bootloader" ]
   pull_request:
-    branches: [ "Bootloader" ]
+    branches: [ "Documentation", "Bootloader" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,19 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        ref: Bootloader
 
-      # 1. Установка специального компилятора Rust для ESP32
-      - name: Install ESP Rust Toolchain
-        uses: esp-rs/xtensa-toolchain@v1.5
-        with:
-          default: true
-          buildtargets: esp32s3
-          ldproxy: true  # Обязательно для esp-idf проектов
+    - name: Build
+      run: cargo build --verbose
 
-      # 2. Сборка загрузчика
-      - name: Build Bootloader
-        working-directory: ./Bootloader  # Путь к директории с Cargo.toml
-        run: |
-          source ${ESPUP_EXPORT_FILE:-$HOME/export-esp.sh}
-          cargo +esp build --release --verbose
+    - name: Run tests
+      run: cargo test --verbose
