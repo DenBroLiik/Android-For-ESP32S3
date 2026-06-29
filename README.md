@@ -121,7 +121,7 @@
 **Энкодер с кнопкой**
 - GPIO[11] = PIN "RIGHT" # Энкодер
 - GPIO[12] = PIN "LEFT" # Энкодер
-- GPIO[13] = PIN "LEFT" # Кнопка
+- GPIO[13] = PIN "PASS" # Кнопка
 
 **SD модуль**
 - GND = GND
