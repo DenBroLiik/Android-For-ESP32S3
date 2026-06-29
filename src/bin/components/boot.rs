@@ -5,9 +5,11 @@ use crate::{
     components::{
         board::{Board, DisplayStatus},
         diagnostics::{log_component_map, log_component_status, log_memory},
-        fastboot_plus::{FastbootExit, enter_fastboot},
     },
-    vendor::{fastboot::FastbootPlus, logo, ram::RAM, rtc},
+    vendor::{
+        fastboot::{FastbootExit, FastbootPlus, enter_fastboot},
+        logo, ram::RAM, rtc,
+    },
     xtensa_lx7_cpu_to_gpu::{GpuCommand, PixelFormat, XtensaLx7CpuToGpu},
 };
 
@@ -28,10 +30,10 @@ impl BootError {
     }
 }
 
-pub fn run_bootloader(
-    board: &mut Board<'_>,
+pub fn run_bootloader<'a>(
+    board: &mut Board<'a>,
     delay: &Delay,
-    fastboot: &mut FastbootPlus<'_>,
+    fastboot: &mut FastbootPlus<'a>,
 ) -> ! {
     board.status_led.show_startup(delay);
     board.show_display_lines(["ZEPHYR WATCH", "BOOTING", "", ""]);
@@ -41,8 +43,8 @@ pub fn run_bootloader(
     board.probe_sd_card();
     log_component_status(board);
 
-    rtc::set_date(2026, 2, 19);
-    rtc::set_time(12, 0, 0);
+    rtc::set_date(2026, 2, 19);  // u16, u8, u8
+    rtc::set_time(12, 0, 0);     // u8, u8, u8
 
     let mut ram = RAM::new(4, 65536, 320, 2048);
     let mut cpu_to_gpu = XtensaLx7CpuToGpu::new();
@@ -116,14 +118,13 @@ pub fn run_bootloader(
         }
     }
 
-    println!("Boot completed to diagnostic runtime. SD detected, display backend is still deferred.");
+    println!("Boot completed to diagnostic runtime.");
     board.status_led.show_startup(delay);
     delay.delay_millis(150);
     board.status_led.off(delay);
 
     let mut counter = 0;
     loop {
-        rtc::rtc_tick();
         counter += 1;
 
         for _ in 0..20 {
@@ -137,6 +138,7 @@ pub fn run_bootloader(
             }
 
             delay.delay_millis(50);
+            rtc::rtc_tick_ms(50); // ← сюда, каждые реальные 50ms
         }
 
         let (year, month, day) = rtc::get_date();
@@ -145,12 +147,8 @@ pub fn run_bootloader(
         println!(
             "Counter: {} | Date: {:04}-{:02}-{:02} Time: {:02}:{:02}:{:02} | GPU cmds: {} | Frames: {} | SD={} | PWR={} | ENC={}",
             counter,
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
+            year, month, day,
+            hour, minute, second,
             cpu_to_gpu.pending_commands(),
             cpu_to_gpu.submitted_frames(),
             board.sd_card_present(),

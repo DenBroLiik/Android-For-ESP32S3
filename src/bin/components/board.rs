@@ -11,14 +11,15 @@ use crate::{
 };
 
 pub const PIN_STATUS_LED: u8 = 21;
-pub const PIN_SD_CS: u8 = 12;
-pub const PIN_SD_MOSI: u8 = 11;
-pub const PIN_SD_MISO: u8 = 10;
-pub const PIN_DISPLAY_SDA: u8 = 2;
-pub const PIN_DISPLAY_SCL: u8 = 1;
-pub const PIN_ENCODER_A: u8 = 8;
-pub const PIN_ENCODER_B: u8 = 7;
-pub const PIN_POWER_BUTTON: u8 = 9;
+pub const PIN_SD_CS: u8 = 10;
+pub const PIN_SD_MOSI: u8 = 9;
+pub const PIN_SD_CLK:  u8 = 8;
+pub const PIN_SD_MISO: u8 = 7;
+pub const PIN_DISPLAY_SDA: u8 = 5;
+pub const PIN_DISPLAY_SCL: u8 = 6;
+pub const PIN_ENCODER_A: u8 = 11;
+pub const PIN_ENCODER_B: u8 = 12;
+pub const PIN_POWER_BUTTON: u8 = 13;
 
 const ENCODER_COLOR_PALETTE: [RgbColor; 8] = [
     RgbColor::new(255, 0, 0),
@@ -77,21 +78,20 @@ impl<'d> Board<'d> {
     pub fn new(
         _spi2: impl esp_hal::spi::master::Instance + 'd,
         i2c0: impl esp_hal::i2c::master::Instance + 'd,
-        gpio21: impl Pin + 'd,
-        _gpio10: impl Pin + 'd,
-        gpio8: impl Pin + 'd,
-        gpio7: impl Pin + 'd,
-        _gpio12: impl Pin + 'd,
-        gpio9: impl Pin + 'd,
-        _gpio11: impl Pin + 'd,
-        gpio2: impl Pin + 'd,
         gpio1: impl Pin + 'd,
+        gpio2: impl Pin + 'd,
+        _gpio7: impl Pin + 'd,
+        _gpio8: impl Pin + 'd,
+        _gpio9: impl Pin + 'd,
+        _gpio10: impl Pin + 'd,
+        gpio11: impl Pin + 'd,
+        gpio12: impl Pin + 'd,
+        gpio13: impl Pin + 'd,
+        gpio21: impl Pin + 'd,
+        
     ) -> Self {
-        let status_led = StatusLed::new(gpio21.degrade());
-        let encoder_a = Input::new(gpio8.degrade(), InputConfig::default().with_pull(Pull::Up));
-        let encoder_b = Input::new(gpio7.degrade(), InputConfig::default().with_pull(Pull::Up));
-        let power_button = Input::new(gpio9.degrade(), InputConfig::default().with_pull(Pull::Up));
-
+        let _ = _spi2;
+        
         let display = I2c::new(
             i2c0,
             I2cConfig::default().with_frequency(Rate::from_khz(400)),
@@ -99,15 +99,23 @@ impl<'d> Board<'d> {
         .ok()
         .map(|i2c| i2c.with_sda(gpio2.degrade()).with_scl(gpio1.degrade()))
         .and_then(|i2c| Ssd1306Display::new(i2c).ok());
-
         let display_status = if display.is_some() {
             DisplayStatus::Ready
         } else {
             DisplayStatus::Deferred
         };
+        
+        let _ = _gpio7;
+        let _ = _gpio8;
+        let _ = _gpio9;
 
+        let encoder_a = Input::new(gpio11.degrade(), InputConfig::default().with_pull(Pull::Up));
+        let encoder_b = Input::new(gpio12.degrade(), InputConfig::default().with_pull(Pull::Up));
+        let power_button = Input::new(gpio13.degrade(), InputConfig::default().with_pull(Pull::Up));
         let encoder_state = ((encoder_a.is_low() as u8) << 1) | (encoder_b.is_low() as u8);
-
+        
+        let status_led = StatusLed::new(gpio21.degrade());
+        
         Self {
             status_led,
             encoder_a,

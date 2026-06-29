@@ -28,6 +28,7 @@ smartstring = { version = "1.0.0", default-features = false }
 rhai_codegen = { version = "3.1.0", path = "codegen" }
 
 no-std-compat = { path = "../vendor/no-std-compat", version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
+# no-std-compat = { version = "0.4.1", default-features = false, features = ["alloc"], optional = true }
 libm = { version = "0.2.0", default-features = false, optional = true }
 hashbrown = { version = "0.16.0", optional = true }
 core-error = { version = "0.0.0", default-features = false, features = ["alloc"], optional = true }

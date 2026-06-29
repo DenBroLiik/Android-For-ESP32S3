@@ -19,12 +19,5 @@ target = "xtensa-esp32s3-none-elf"
 # [source.vendored-sources]
 # directory = "vendor"
 
-# [unstable]
-# build-std = ["alloc", "core"]
-
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "vendor"
-
+[unstable]
+build-std = ["alloc", "core"]
