@@ -12,19 +12,20 @@ use esp_hal::{
     usb_serial_jtag::UsbSerialJtag,
 };
 
+mod drivers;
 #[path = "drivers/xtensa_lx7/xtensa_lx7_core_temperature.rs"]
 pub mod xtensa_lx7_core_temperature;
 #[path = "drivers/xtensa_lx7/xtensa_lx7_core_control.rs"]
 pub mod xtensa_lx7_core_control;
 #[path = "drivers/xtensa_lx7/xtensa_lx7_cpu_to_gpu.rs"]
 mod xtensa_lx7_cpu_to_gpu;
-#[path = "drivers/ssd1306.rs"]
+#[path = "vendor/driver/ssd1306.rs"]
 mod ssd1306;
 mod components;
 mod vendor;
 
 use components::{board::Board, boot::run_bootloader};
-use vendor::fastboot::FastbootPlus;
+use vendor::fastboot::Fastboot;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -36,12 +37,23 @@ fn init() -> esp_hal::peripherals::Peripherals {
 
 #[main]
 fn main() -> ! {
+    // VAR
+    let version_bootloader = env!("CARGO_PKG_VERSION");
+    let product = "ESP32 S3 Zero";
+    let model = "zero";
+    let serialno = "0";
+    let secure = "yes";
+    let mut unlocked = "yes";
+    let mut current_slot = "a";
+    let slot_count: u8 = 2;
+
+
     let peripherals = init();
     let delay = Delay::new();
 
     xtensa_lx7_core_control::init();
 
-    let mut fastboot = FastbootPlus::new(UsbSerialJtag::new(peripherals.USB_DEVICE));
+    let mut fastboot = Fastboot::new(UsbSerialJtag::new(peripherals.USB_DEVICE));
     let mut board = Board::new(
         peripherals.SPI2,
         peripherals.I2C0,
@@ -56,6 +68,5 @@ fn main() -> ! {
         peripherals.GPIO13,  // power button
         peripherals.GPIO21,  // status LED
     );
-
     run_bootloader(&mut board, &delay, &mut fastboot)
 }

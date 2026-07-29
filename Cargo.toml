@@ -6,7 +6,7 @@ version      = "0.1.0"
 
 [[bin]]
 name = "bootloader"
-path = "./src/bin/main.rs"
+path = "./src/main.rs"
 
 [dependencies]
 esp-hal = { version = "~1.0.0", features = ["esp32s3", "unstable"] }

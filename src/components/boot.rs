@@ -7,7 +7,7 @@ use crate::{
         diagnostics::{log_component_map, log_component_status, log_memory},
     },
     vendor::{
-        fastboot::{FastbootExit, FastbootPlus, enter_fastboot},
+        fastboot::{FastbootExit, Fastboot, enter_fastboot},
         logo, ram::RAM, rtc,
     },
     xtensa_lx7_cpu_to_gpu::{GpuCommand, PixelFormat, XtensaLx7CpuToGpu},
@@ -33,7 +33,7 @@ impl BootError {
 pub fn run_bootloader<'a>(
     board: &mut Board<'a>,
     delay: &Delay,
-    fastboot: &mut FastbootPlus<'a>,
+    fastboot: &mut Fastboot<'a>,
 ) -> ! {
     board.status_led.show_startup(delay);
     board.show_display_lines(["ZEPHYR WATCH", "BOOTING", "", ""]);
@@ -142,7 +142,7 @@ pub fn run_bootloader<'a>(
         }
 
         let (year, month, day) = rtc::get_date();
-        let (hour, minute, second) = rtc::get_time();
+        let (hour, minute, second, millisecond) = rtc::get_time();
 
         println!(
             "Counter: {} | Date: {:04}-{:02}-{:02} Time: {:02}:{:02}:{:02} | GPU cmds: {} | Frames: {} | SD={} | PWR={} | ENC={}",

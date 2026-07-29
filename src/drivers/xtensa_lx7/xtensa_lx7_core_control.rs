@@ -3,7 +3,7 @@
 
 use crate::xtensa_lx7_core_temperature::{ThrottleLevel, current_throttle_level};
 
-// ── Регистры управления тактированием ESP32-S3 ────────────────────────
+// Регистры управления тактированием ESP32-S3
 
 const SYSTEM_BASE: u32            = 0x600C_0000;
 const SYSTEM_CPU_PER_CONF_REG: *mut u32 = (SYSTEM_BASE + 0x08) as *mut u32;
@@ -19,7 +19,7 @@ unsafe fn set_cpu_mhz_raw(mhz: u32) {
     SYSTEM_CPU_PER_CONF_REG.write_volatile((old & !CPU_PERIOD_SEL_MASK) | sel); }
 }
 
-// ── CpuFreq ───────────────────────────────────────────────────────────────────
+// CpuFreq
 
 /// Поддерживаемые частоты CPU на ESP32-S3 через BBPLL.
 /// Critical тротлинг (таргет 40 МГц) отображается на Mhz80 — аппаратный минимум.
@@ -55,7 +55,7 @@ impl CpuFreq {
     }
 }
 
-// ── Watchdog RTC (RWDT) ───────────────────────────────────────────────────
+// Watchdog RTC (RWDT)
 
 const RTC_CNTL_BASE: u32             = 0x6000_8000;
 const RTC_CNTL_WDTCONFIG0: *mut u32  = (RTC_CNTL_BASE + 0x98) as *mut u32;
@@ -83,7 +83,7 @@ pub fn wdt_disable() {
     wdt_lock();
 }
 
-// ── CoreState ────────────────────────────────────────────────────────────────
+// CoreState 
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CoreState {
@@ -119,7 +119,7 @@ unsafe fn apply_freq(freq: CpuFreq) {
     }
 }
 
-// ── Публичный API ───────────────────────────────────────────────────────────
+// Публичный API
 
 /// Инициализировать контроллер ядра. Вызвать один раз после `esp_hal::init()`.
 pub fn init() {
